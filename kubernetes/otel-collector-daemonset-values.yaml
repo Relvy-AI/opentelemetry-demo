@@ -79,6 +79,16 @@ extraEnvs:
       secretKeyRef:
         name: newrelic
         key: api_key
+  - name: OPENOBSERVE_ENDPOINT
+    valueFrom:
+      secretKeyRef:
+        name: openobserve
+        key: endpoint
+  - name: OPENOBSERVE_AUTH
+    valueFrom:
+      secretKeyRef:
+        name: openobserve
+        key: auth_header
 presets:
   # enables the k8sattributesprocessor and adds it to the traces, metrics, and logs pipelines
   kubernetesAttributes:
@@ -162,9 +172,9 @@ config:
       tls:
         insecure: true
     otlphttp/openobserve:
-      endpoint: http://98.93.225.247:5080/api/default
+      endpoint: ${env:OPENOBSERVE_ENDPOINT}
       headers:
-        Authorization: "Basic cm9vdEBleGFtcGxlLmNvbTpnMUo2QkVIa2M0Mk4zMHRI"
+        Authorization: "${env:OPENOBSERVE_AUTH}"
         stream-name: default
     otlphttp/elasticsearch:
       endpoint: ${env:ELASTIC_ENDPOINT}
