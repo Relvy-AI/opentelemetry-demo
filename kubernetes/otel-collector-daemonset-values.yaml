@@ -79,6 +79,21 @@ extraEnvs:
       secretKeyRef:
         name: newrelic
         key: api_key
+  - name: OPENSEARCH_ENDPOINT
+    valueFrom:
+      secretKeyRef:
+        name: opensearch
+        key: endpoint
+  - name: OPENSEARCH_USERNAME
+    valueFrom:
+      secretKeyRef:
+        name: opensearch
+        key: username
+  - name: OPENSEARCH_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: opensearch
+        key: password
 presets:
   # enables the k8sattributesprocessor and adds it to the traces, metrics, and logs pipelines
   kubernetesAttributes:
@@ -161,6 +176,15 @@ config:
       timeout: 60s
       tls:
         insecure: true
+    opensearch:
+      http:
+        endpoint: ${env:OPENSEARCH_ENDPOINT}
+        auth:
+          authenticator: basicauth/opensearch
+        tls:
+          insecure_skip_verify: true
+      logs_index: otel-logs
+      traces_index: otel-traces
     otlphttp/elasticsearch:
       endpoint: ${env:ELASTIC_ENDPOINT}
       headers:
@@ -173,16 +197,20 @@ config:
       client_auth:
         username: ${env:ELASTIC_USERNAME}
         password: ${env:ELASTIC_PASSWORD}
+    basicauth/opensearch:
+      client_auth:
+        username: ${env:OPENSEARCH_USERNAME}
+        password: ${env:OPENSEARCH_PASSWORD}
   service:
-    extensions: [health_check, basicauth, sigv4auth/logs]
+    extensions: [health_check, basicauth, basicauth/opensearch, sigv4auth/logs]
     pipelines:
       traces:
         processors: [probabilistic_sampler, resource]
-        exporters: [ datadog/connector, datadog/exporter, spanmetrics, otlphttp/newrelic ]
+        exporters: [ datadog/connector, datadog/exporter, spanmetrics, otlphttp/newrelic, opensearch ]
       metrics:
         receivers: [ otlp, hostmetrics, datadog/connector, spanmetrics ]
         processors: [resource]
         exporters: [ prometheusremotewrite, datadog/exporter, otlphttp/newrelic ]
       logs:
         processors: [resource]
-        exporters: [ datadog/exporter, otlphttp/observeinclogs, otlphttp/newrelic, otlphttp/cloudwatch, otlphttp/elasticsearch ]
+        exporters: [ datadog/exporter, otlphttp/observeinclogs, otlphttp/newrelic, otlphttp/cloudwatch, otlphttp/elasticsearch, opensearch ]
