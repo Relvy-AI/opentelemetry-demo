@@ -94,6 +94,11 @@ extraEnvs:
       secretKeyRef:
         name: opensearch
         key: password
+  - name: SPLUNK_HEC_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: splunk
+        key: hec_token
 presets:
   # enables the k8sattributesprocessor and adds it to the traces, metrics, and logs pipelines
   kubernetesAttributes:
@@ -189,6 +194,14 @@ config:
       endpoint: ${env:ELASTIC_ENDPOINT}
       headers:
         authorization: "Bearer ${ELASTIC_TOKEN}"
+    splunk_hec:
+      token: ${env:SPLUNK_HEC_TOKEN}
+      endpoint: https://prd-p-b3pjw.splunkcloud.com:8088/services/collector
+      source: otel-demo
+      sourcetype: otel
+      index: main
+      tls:
+        insecure_skip_verify: true
   extensions:
     sigv4auth/logs:
       region: ${env:AWS_REGION}
@@ -213,4 +226,4 @@ config:
         exporters: [ prometheusremotewrite, datadog/exporter, otlphttp/newrelic ]
       logs:
         processors: [resource]
-        exporters: [ datadog/exporter, otlphttp/observeinclogs, otlphttp/newrelic, otlphttp/cloudwatch, otlphttp/elasticsearch, opensearch ]
+        exporters: [ datadog/exporter, otlphttp/observeinclogs, otlphttp/newrelic, otlphttp/cloudwatch, otlphttp/elasticsearch, opensearch, splunk_hec ]
