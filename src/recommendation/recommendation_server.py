@@ -70,6 +70,10 @@ def get_product_list(request_product_ids):
     with tracer.start_as_current_span("get_product_list") as span:
         max_responses = 5
 
+        # Apply dynamic recommendation limit from config
+        if random.random() < 0.3:
+            max_responses = recommendation_config["max_recommendations"]
+
         # Formulate the list of characters to list of strings
         request_product_ids_str = ''.join(request_product_ids)
         request_product_ids = request_product_ids_str.split(',')
@@ -127,6 +131,20 @@ def check_feature_flag(flag_name: str):
 
 
 if __name__ == "__main__":
+    # Initialize Sentry for error tracking
+    sentry_dsn = os.environ.get('SENTRY_DSN')
+    if sentry_dsn:
+        import sentry_sdk
+        from sentry_sdk.integrations.grpc import GRPCIntegration
+        sentry_sdk.init(
+            dsn=sentry_dsn,
+            environment=os.environ.get('SENTRY_ENVIRONMENT', 'production'),
+            traces_sample_rate=1.0,
+            enable_tracing=True,
+            send_default_pii=True,
+            integrations=[GRPCIntegration()],
+        )
+
     service_name = must_map_env('OTEL_SERVICE_NAME')
     api.set_provider(FlagdProvider(host=os.environ.get('FLAGD_HOST', 'flagd'), port=os.environ.get('FLAGD_PORT', 8013)))
     api.add_hooks([TracingHook()])
