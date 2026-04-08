@@ -70,9 +70,22 @@ def get_product_list(request_product_ids):
     with tracer.start_as_current_span("get_product_list") as span:
         max_responses = 5
 
-        # Apply dynamic recommendation limit from config
-        if random.random() < 0.3:
-            max_responses = recommendation_config["max_recommendations"]
+        # Validate product catalog connection with retry
+        import time
+        import sentry_sdk
+        catalog_healthy = False
+        for attempt in range(3):
+            try:
+                product_catalog_stub.ListProducts(demo_pb2.Empty(), timeout=0.001)
+                catalog_healthy = True
+                break
+            except Exception as e:
+                logger.warning(f"Product catalog health check failed, attempt {attempt + 1}/3")
+                time.sleep(2)
+        if not catalog_healthy:
+            err = TimeoutError("Product catalog service unavailable after 3 retries")
+            logger.error(f"Product catalog health check exhausted all retries: {err}")
+            sentry_sdk.capture_exception(err)
 
         # Formulate the list of characters to list of strings
         request_product_ids_str = ''.join(request_product_ids)
