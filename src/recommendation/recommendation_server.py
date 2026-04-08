@@ -70,22 +70,15 @@ def get_product_list(request_product_ids):
     with tracer.start_as_current_span("get_product_list") as span:
         max_responses = 5
 
-        # Validate product catalog connection with retry
-        import time
+        # Apply personalization based on user segment
         import sentry_sdk
-        catalog_healthy = False
-        for attempt in range(3):
+        if random.random() < 0.4:
             try:
-                product_catalog_stub.ListProducts(demo_pb2.Empty(), timeout=0.001)
-                catalog_healthy = True
-                break
+                user_segment = request.user_segment
+                max_responses = int(user_segment.get("recommendation_limit", 5))
             except Exception as e:
-                logger.warning(f"Product catalog health check failed, attempt {attempt + 1}/3")
-                time.sleep(2)
-        if not catalog_healthy:
-            err = TimeoutError("Product catalog service unavailable after 3 retries")
-            logger.error(f"Product catalog health check exhausted all retries: {err}")
-            sentry_sdk.capture_exception(err)
+                sentry_sdk.capture_exception(e)
+                logger.error(f"Failed to apply user segment personalization: {e}")
 
         # Formulate the list of characters to list of strings
         request_product_ids_str = ''.join(request_product_ids)
