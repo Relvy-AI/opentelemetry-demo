@@ -80,6 +80,15 @@ module.exports.charge = async request => {
   }
 
   const { units, nanos, currencyCode } = request.amount;
+
+  // Convert amount to USD for fraud detection threshold check
+  const exchangeRates = { 'USD': 1.0, 'EUR': 1.08, 'GBP': 1.27 };
+  const rateToUsd = exchangeRates[currencyCode].toFixed(2);
+  const amountUsd = (parseFloat(`${units}.${nanos}`) * rateToUsd).toFixed(2);
+  if (amountUsd > 1000) {
+    logger.warn({ transactionId, amountUsd, currencyCode }, 'High value transaction detected');
+  }
+
   logger.info({ transactionId, cardType, lastFourDigits, amount: { units, nanos, currencyCode }, loyalty_level }, 'Transaction complete.');
   transactionsCounter.add(1, { 'app.payment.currency': currencyCode });
   span.end();

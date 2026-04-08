@@ -1,5 +1,15 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
+const Sentry = require('@sentry/node')
+
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.SENTRY_ENVIRONMENT || 'production',
+    tracesSampleRate: 1.0,
+  })
+}
+
 const grpc = require('@grpc/grpc-js')
 const protoLoader = require('@grpc/proto-loader')
 const health = require('grpc-js-health-check')
@@ -26,6 +36,10 @@ async function chargeServiceHandler(call, callback) {
 
     span.recordException(err)
     span.setStatus({ code: opentelemetry.SpanStatusCode.ERROR })
+
+    if (process.env.SENTRY_DSN) {
+      Sentry.captureException(err)
+    }
 
     callback(err)
   }
