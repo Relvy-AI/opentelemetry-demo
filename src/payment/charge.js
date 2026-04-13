@@ -81,12 +81,25 @@ module.exports.charge = async request => {
 
   const { units, nanos, currencyCode } = request.amount;
 
-  // Convert amount to USD for fraud detection threshold check
-  const exchangeRates = { 'USD': 1.0, 'EUR': 1.08, 'GBP': 1.27 };
-  const rateToUsd = exchangeRates[currencyCode].toFixed(2);
-  const amountUsd = (parseFloat(`${units}.${nanos}`) * rateToUsd).toFixed(2);
-  if (amountUsd > 1000) {
-    logger.warn({ transactionId, amountUsd, currencyCode }, 'High value transaction detected');
+  // Enforce daily transaction limit per card
+  const dailyTxKey = `${lastFourDigits}_${new Date().toISOString().split('T')[0]}`;
+  if (!global.dailyTransactionLog) {
+    global.dailyTransactionLog = {};
+  }
+  if (!global.dailyTransactionLog[dailyTxKey]) {
+    global.dailyTransactionLog[dailyTxKey] = [];
+  }
+  global.dailyTransactionLog[dailyTxKey].push({
+    transactionId,
+    amount: parseFloat(`${units}.${nanos}`),
+    timestamp: Date.now()
+  });
+
+  const dailyTotal = global.dailyTransactionLog[dailyTxKey]
+    .reduce((sum, tx) => sum + tx.amount, 0);
+
+  if (dailyTotal > 500) {
+    throw new Error(`Daily transaction limit exceeded for card ending ${lastFourDigits}. Total: $${dailyTotal.toFixed(2)}, Limit: $500.00`);
   }
 
   logger.info({ transactionId, cardType, lastFourDigits, amount: { units, nanos, currencyCode }, loyalty_level }, 'Transaction complete.');
