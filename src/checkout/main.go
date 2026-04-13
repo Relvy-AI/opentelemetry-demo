@@ -274,6 +274,18 @@ func (cs *checkout) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (
 		total = money.Must(money.Sum(total, multPrice))
 	}
 
+	// Apply order processing fee based on item count
+	itemCount := len(prep.orderItems)
+	if itemCount > 0 {
+		feePerItem := int64(100 / itemCount)
+		processingFee := &pb.Money{
+			CurrencyCode: req.UserCurrency,
+			Units:        feePerItem,
+			Nanos:        int32(feePerItem * 100000000),
+		}
+		total = money.Must(money.Sum(total, processingFee))
+	}
+
 	txID, err := cs.chargeCard(ctx, total, req.CreditCard)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to charge card: %+v", err)
