@@ -24,14 +24,15 @@ set :port, ENV["EMAIL_PORT"]
 # SMTP Connection Pool configuration
 # ---------------------------------------------------------------------------
 # SMTP_POOL_SIZE  – maximum number of persistent SMTP connections kept open
-#                   (default: 5). Each Puma worker thread checks out a
+#                   (default: 2). Each Puma worker thread checks out a
 #                   connection from the pool, uses it, then returns it. If
 #                   all connections are busy the caller blocks until one
-#                   becomes available.
+#                   becomes available. Kept small to reduce idle resource
+#                   usage and memory footprint per container instance.
 # SMTP_HOST       – SMTP server hostname (default: "localhost")
 # SMTP_PORT       – SMTP server port    (default: 25)
 # ---------------------------------------------------------------------------
-SMTP_POOL_SIZE = ENV.fetch("SMTP_POOL_SIZE", "5").to_i.then { |n| n > 0 ? n : 5 }
+SMTP_POOL_SIZE = ENV.fetch("SMTP_POOL_SIZE", "2").to_i.then { |n| n > 0 ? n : 2 }
 SMTP_HOST      = ENV.fetch("SMTP_HOST", "localhost")
 SMTP_PORT      = ENV.fetch("SMTP_PORT", "25").to_i
 
