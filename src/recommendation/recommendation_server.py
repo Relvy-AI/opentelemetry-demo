@@ -7,6 +7,8 @@
 # Python
 import os
 import random
+import threading
+import time
 from concurrent import futures
 
 # Pip
@@ -35,9 +37,13 @@ from grpc_health.v1 import health_pb2_grpc
 from metrics import (
     init_metrics
 )
+from cache import init_cache, get_cache
 
 cached_ids = []
 first_run = True
+cache_cleanup_thread = None
+stop_cleanup = threading.Event()
+
 
 class RecommendationService(demo_pb2_grpc.RecommendationServiceServicer):
     def ListRecommendations(self, request, context):
@@ -64,23 +70,56 @@ class RecommendationService(demo_pb2_grpc.RecommendationServiceServicer):
             status=health_pb2.HealthCheckResponse.UNIMPLEMENTED)
 
 
+def cache_cleanup_worker():
+    """Background worker to clean up expired cache entries and update metrics."""
+    logger.info("Cache cleanup worker started")
+    
+    while not stop_cleanup.is_set():
+        try:
+            cache = get_cache()
+            if cache:
+                # Clean up expired entries
+                expired_count = cache.cleanup_expired()
+                if expired_count > 0:
+                    logger.debug(f"Cleaned up {expired_count} expired cache entries")
+                
+                # Update cache size metric
+                stats = cache.stats()
+                rec_svc_metrics["app_cache_size_gauge"].set(stats["active_entries"])
+            
+        except Exception as e:
+            logger.error(f"Error in cache cleanup worker: {e}")
+        
+        # Wait for 60 seconds or until stop signal
+        stop_cleanup.wait(60)
+    
+    logger.info("Cache cleanup worker stopped")
+
+
 def get_product_list(request_product_ids):
     global first_run
     global cached_ids
     with tracer.start_as_current_span("get_product_list") as span:
         max_responses = 5
+        cache = get_cache()
 
         # Formulate the list of characters to list of strings
         request_product_ids_str = ''.join(request_product_ids)
         request_product_ids = request_product_ids_str.split(',')
 
-        # Feature flag scenario - Cache Leak
+        # Create cache key based on request (for more specific caching)
+        cache_key = f"products_list"
+        
+        product_ids = None
+        cache_hit = False
+
+        # Feature flag scenario - Cache Leak (legacy behavior)
         if check_feature_flag("recommendationCacheFailure"):
             span.set_attribute("app.recommendation.cache_enabled", True)
             if random.random() < 0.5 or first_run:
                 first_run = False
                 span.set_attribute("app.cache_hit", False)
-                logger.info("get_product_list: cache miss")
+                logger.info("get_product_list: cache miss (feature flag)")
                 cat_response = product_catalog_stub.ListProducts(demo_pb2.Empty())
                 response_ids = [x.id for x in cat_response.products]
                 cached_ids = cached_ids + response_ids
@@ -88,12 +127,38 @@ def get_product_list(request_product_ids):
                 product_ids = cached_ids
             else:
                 span.set_attribute("app.cache_hit", True)
-                logger.info("get_product_list: cache hit")
+                logger.info("get_product_list: cache hit (feature flag)")
                 product_ids = cached_ids
         else:
-            span.set_attribute("app.recommendation.cache_enabled", False)
-            cat_response = product_catalog_stub.ListProducts(demo_pb2.Empty())
-            product_ids = [x.id for x in cat_response.products]
+            # Use new cache implementation
+            span.set_attribute("app.recommendation.cache_enabled", True)
+            
+            # Try to get from cache first
+            if cache:
+                product_ids = cache.get(cache_key)
+                if product_ids:
+                    cache_hit = True
+                    span.set_attribute("app.cache_hit", True)
+                    logger.info("get_product_list: cache hit")
+                    
+                    # Update cache metrics
+                    rec_svc_metrics["app_cache_hits_counter"].add(1)
+                else:
+                    span.set_attribute("app.cache_hit", False)
+                    logger.info("get_product_list: cache miss")
+                    
+                    # Update cache metrics
+                    rec_svc_metrics["app_cache_misses_counter"].add(1)
+
+            # If not in cache, fetch from product catalog service
+            if not cache_hit:
+                cat_response = product_catalog_stub.ListProducts(demo_pb2.Empty())
+                product_ids = [x.id for x in cat_response.products]
+                
+                # Store in cache if cache is available
+                if cache:
+                    cache.put(cache_key, product_ids)
+                    logger.debug(f"Stored {len(product_ids)} products in cache")
 
         span.set_attribute("app.products.count", len(product_ids))
 
@@ -120,6 +185,16 @@ def must_map_env(key: str):
     return value
 
 
+def get_env_int(key: str, default: int) -> int:
+    """Get an integer environment variable with a default value."""
+    try:
+        value = os.environ.get(key)
+        return int(value) if value is not None else default
+    except ValueError:
+        logger.warning(f"Invalid integer value for {key}, using default: {default}")
+        return default
+
+
 def check_feature_flag(flag_name: str):
     # Initialize OpenFeature
     client = api.get_client()
@@ -135,6 +210,12 @@ if __name__ == "__main__":
     tracer = trace.get_tracer_provider().get_tracer(service_name)
     meter = metrics.get_meter_provider().get_meter(service_name)
     rec_svc_metrics = init_metrics(meter)
+
+    # Initialize Cache with configuration from environment variables
+    cache_max_size = get_env_int('RECOMMENDATION_CACHE_MAX_SIZE', 1000)
+    cache_ttl = get_env_int('RECOMMENDATION_CACHE_TTL', 300)  # 5 minutes default
+    
+    cache = init_cache(max_size=cache_max_size, default_ttl=cache_ttl)
 
     # Initialize Logs
     logger_provider = LoggerProvider(
@@ -152,6 +233,12 @@ if __name__ == "__main__":
     # Attach OTLP handler to logger
     logger = logging.getLogger('main')
     logger.addHandler(handler)
+    
+    logger.info(f"Cache initialized with max_size={cache_max_size}, ttl={cache_ttl}")
+
+    # Start cache cleanup worker thread
+    cache_cleanup_thread = threading.Thread(target=cache_cleanup_worker, daemon=True)
+    cache_cleanup_thread.start()
 
     catalog_addr = must_map_env('PRODUCT_CATALOG_ADDR')
     pc_channel = grpc.insecure_channel(catalog_addr)
@@ -170,4 +257,12 @@ if __name__ == "__main__":
     server.add_insecure_port(f'[::]:{port}')
     server.start()
     logger.info(f'Recommendation service started, listening on port {port}')
-    server.wait_for_termination()
+    
+    try:
+        server.wait_for_termination()
+    finally:
+        # Signal cleanup thread to stop
+        stop_cleanup.set()
+        if cache_cleanup_thread:
+            cache_cleanup_thread.join(timeout=5)
+        logger.info("Service shutdown complete")

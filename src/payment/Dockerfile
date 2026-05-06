@@ -25,6 +25,8 @@ COPY ./src/payment/charge.js charge.js
 COPY ./src/payment/index.js index.js
 COPY ./src/payment/logger.js logger.js
 COPY ./src/payment/opentelemetry.js opentelemetry.js
+COPY ./src/payment/retry.js retry.js
+COPY ./src/payment/paymentGateway.js paymentGateway.js
 
 EXPOSE ${PAYMENT_PORT}
 

@@ -34,6 +34,39 @@ async function closeGracefully(signal) {
   process.kill(process.pid, signal)
 }
 
+// Log retry configuration on startup
+function logRetryConfiguration() {
+  const retryConfig = {
+    maxRetries: process.env.PAYMENT_RETRY_MAX_ATTEMPTS || '3',
+    baseDelayMs: process.env.PAYMENT_RETRY_BASE_DELAY_MS || '100',
+    maxDelayMs: process.env.PAYMENT_RETRY_MAX_DELAY_MS || '5000',
+    backoffMultiplier: process.env.PAYMENT_RETRY_BACKOFF_MULTIPLIER || '2',
+    jitterEnabled: process.env.PAYMENT_RETRY_JITTER_ENABLED !== 'false',
+    simulateFailures: process.env.PAYMENT_SIMULATE_FAILURES === 'true',
+    failureRate: process.env.PAYMENT_FAILURE_RATE || '0.2'
+  };
+  
+  logger.info({ retryConfig }, 'Payment service retry configuration loaded');
+}
+
+// Perform health check periodically
+async function startHealthMonitoring() {
+  const healthCheckInterval = parseInt(process.env.PAYMENT_HEALTH_CHECK_INTERVAL_MS || '30000'); // 30 seconds
+  
+  setInterval(async () => {
+    try {
+      const healthStatus = await charge.healthCheck();
+      if (healthStatus.status === 'unhealthy') {
+        logger.warn({ healthStatus }, 'Payment service health check failed');
+      } else {
+        logger.debug({ healthStatus }, 'Payment service health check passed');
+      }
+    } catch (error) {
+      logger.error({ error: error.message }, 'Health check monitoring error');
+    }
+  }, healthCheckInterval);
+}
+
 const otelDemoPackage = grpc.loadPackageDefinition(protoLoader.loadSync('demo.proto'))
 const server = new grpc.Server()
 
@@ -42,7 +75,6 @@ server.addService(health.service, new health.Implementation({
 }))
 
 server.addService(otelDemoPackage.oteldemo.PaymentService.service, { charge: chargeServiceHandler })
-
 
 let ip = "0.0.0.0";
 
@@ -61,6 +93,10 @@ server.bindAsync(address, grpc.ServerCredentials.createInsecure(), (err, port) =
   }
 
   logger.info(`payment gRPC server started on ${address}`)
+  
+  // Log configuration and start health monitoring after server starts
+  logRetryConfiguration();
+  startHealthMonitoring();
 })
 
 process.once('SIGINT', closeGracefully)
