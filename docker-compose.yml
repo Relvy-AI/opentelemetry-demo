@@ -224,6 +224,7 @@ services:
       - OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
       - OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES},service.criticality=medium
       - OTEL_SERVICE_NAME=email
+      - SMTP_POOL_SIZE
     depends_on:
       otel-collector:
         condition: service_started
