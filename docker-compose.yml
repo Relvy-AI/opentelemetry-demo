@@ -218,6 +218,9 @@ services:
     environment:
       - APP_ENV=production
       - EMAIL_PORT
+      - SMTP_POOL_SIZE
+      - SMTP_HOST
+      - SMTP_PORT
       - FLAGD_HOST
       - FLAGD_PORT
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_PORT_HTTP}
